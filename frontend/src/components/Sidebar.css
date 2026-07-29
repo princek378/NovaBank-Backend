@@ -1,0 +1,189 @@
+.sidebar{
+
+width:270px;
+
+min-height:100vh;
+
+background:linear-gradient(
+180deg,
+#020617,
+#0f172a
+);
+
+display:flex;
+
+flex-direction:column;
+
+justify-content:space-between;
+
+padding:25px;
+
+border-right:1px solid rgba(255,255,255,.08);
+
+box-shadow:5px 0 25px rgba(0,0,0,.35);
+
+}
+
+.logo{
+
+text-align:center;
+
+margin-bottom:35px;
+
+}
+
+.logo h2{
+
+color:#38bdf8;
+
+margin:0;
+
+font-size:30px;
+
+}
+
+.logo p{
+
+margin-top:8px;
+
+color:#94a3b8;
+
+font-size:15px;
+
+}
+
+nav{
+
+display:flex;
+
+flex-direction:column;
+
+gap:12px;
+
+}
+
+.nav-link{
+
+text-decoration:none;
+
+padding:16px 18px;
+
+border-radius:14px;
+
+color:#cbd5e1;
+
+font-size:16px;
+
+font-weight:600;
+
+transition:.3s;
+
+display:flex;
+
+align-items:center;
+
+gap:12px;
+
+}
+
+.nav-link:hover{
+
+background:#1e3a8a;
+
+color:white;
+
+transform:translateX(6px);
+
+}
+
+.active{
+
+background:linear-gradient(
+135deg,
+#2563eb,
+#38bdf8
+);
+
+color:white;
+
+box-shadow:0 10px 20px rgba(37,99,235,.35);
+
+}
+
+.logout-section{
+
+margin-top:30px;
+
+}
+
+.logout-btn{
+
+width:100%;
+
+padding:15px;
+
+border:none;
+
+border-radius:14px;
+
+background:#dc2626;
+
+color:white;
+
+font-size:16px;
+
+font-weight:bold;
+
+cursor:pointer;
+
+transition:.3s;
+
+}
+
+.logout-btn:hover{
+
+background:#b91c1c;
+
+transform:translateY(-2px);
+
+}
+
+/* ===== NovaBank Phase 2 Fintech UI Override ===== */
+
+* {
+  outline: none !important;
+}
+
+html, body, #root {
+  min-height:100%;
+  margin:0;
+  background:#020617;
+}
+
+body {
+  overflow-x:hidden;
+}
+
+.admin-layout, .customer-layout {
+  border:none !important;
+}
+
+.card, .stat-card, .stat-box, .profile-card, .chart-card, .settings-card, .customers-card {
+  border: none !important;
+  background: rgba(15,23,42,.85);
+  box-shadow: 0 18px 45px rgba(0,0,0,.35);
+}
+
+input, select, textarea, button {
+  border: none !important;
+  outline:none;
+}
+
+button {
+  cursor:pointer;
+}
+
+table, th, td {
+  border-color:transparent !important;
+}
+

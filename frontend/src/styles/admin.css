@@ -1,0 +1,422 @@
+/* ================================
+   NOVABANK ADMIN MAIN DESIGN
+================================ */
+
+
+.admin-layout{
+
+display:flex;
+
+min-height:100vh;
+
+background:
+linear-gradient(
+135deg,
+#020617,
+#0f172a,
+#1e3a8a
+);
+
+color:white;
+
+}
+
+
+
+
+
+.main-content{
+
+flex:1;
+
+margin-left:260px;
+
+padding:35px;
+
+min-height:100vh;
+
+}
+
+
+
+
+
+/* HEADER */
+
+.dashboard-title{
+
+background:
+
+rgba(15,23,42,0.75);
+
+backdrop-filter:blur(15px);
+
+padding:30px;
+
+border-radius:22px;
+
+border:1px solid rgba(255,255,255,0.1);
+
+box-shadow:
+0 20px 40px rgba(0,0,0,.3);
+
+}
+
+
+
+.dashboard-title h1{
+
+font-size:38px;
+
+margin:0;
+
+color:white;
+
+}
+
+
+
+.dashboard-title p{
+
+color:#94a3b8;
+
+font-size:18px;
+
+}
+
+
+
+
+
+/* STAT CARDS */
+
+
+.cards{
+
+display:grid;
+
+grid-template-columns:
+repeat(auto-fit,minmax(230px,1fr));
+
+gap:25px;
+
+margin-top:30px;
+
+}
+
+
+
+
+
+.stat-card{
+
+
+background:
+
+linear-gradient(
+145deg,
+#0f172a,
+#1e293b
+);
+
+
+padding:25px;
+
+border-radius:22px;
+
+
+border:
+
+1px solid rgba(56,189,248,.25);
+
+
+box-shadow:
+
+0 15px 35px rgba(0,0,0,.35);
+
+
+transition:.3s;
+
+
+}
+
+
+
+
+.stat-card:hover{
+
+
+transform:translateY(-8px);
+
+
+box-shadow:
+
+0 25px 45px rgba(0,0,0,.5);
+
+
+}
+
+
+
+
+.stat-card h3{
+
+
+color:#94a3b8;
+
+font-size:17px;
+
+
+}
+
+
+
+
+.stat-card h1{
+
+
+font-size:38px;
+
+color:#38bdf8;
+
+margin-top:15px;
+
+
+}
+
+
+
+
+
+/* SECTIONS */
+
+
+.admin-section{
+
+
+margin-top:40px;
+
+
+background:
+
+rgba(15,23,42,.8);
+
+
+padding:30px;
+
+
+border-radius:22px;
+
+
+border:
+
+1px solid rgba(255,255,255,.1);
+
+
+box-shadow:
+
+0 15px 35px rgba(0,0,0,.35);
+
+
+}
+
+
+
+
+.admin-section h2{
+
+
+color:white;
+
+
+}
+
+
+
+
+
+/* BUTTONS */
+
+
+.admin-buttons button{
+
+
+background:
+
+linear-gradient(
+135deg,
+#2563eb,
+#38bdf8
+);
+
+
+color:white;
+
+
+border:none;
+
+
+padding:
+
+14px 25px;
+
+
+border-radius:12px;
+
+
+margin-right:15px;
+
+
+cursor:pointer;
+
+
+font-size:16px;
+
+
+font-weight:bold;
+
+
+transition:.3s;
+
+
+}
+
+
+
+
+
+.admin-buttons button:hover{
+
+
+transform:translateY(-3px);
+
+
+box-shadow:
+
+0 10px 25px rgba(37,99,235,.5);
+
+
+}
+
+
+
+
+
+/* TABLE DESIGN */
+
+
+table{
+
+
+width:100%;
+
+background:#0f172a;
+
+border-radius:18px;
+
+overflow:hidden;
+
+
+}
+
+
+
+
+
+th{
+
+
+background:#1e3a8a;
+
+color:white;
+
+padding:18px;
+
+
+}
+
+
+
+td{
+
+
+color:#e2e8f0;
+
+padding:18px;
+
+border-bottom:
+
+1px solid #334155;
+
+
+}
+
+
+
+
+
+
+/* SCROLLBAR */
+
+
+::-webkit-scrollbar{
+
+width:8px;
+
+}
+
+
+::-webkit-scrollbar-track{
+
+background:#020617;
+
+}
+
+
+::-webkit-scrollbar-thumb{
+
+background:#2563eb;
+
+border-radius:20px;
+
+}
+
+/* ===== NovaBank Phase 2 Fintech UI Override ===== */
+
+* {
+  outline: none !important;
+}
+
+html, body, #root {
+  min-height:100%;
+  margin:0;
+  background:#020617;
+}
+
+body {
+  overflow-x:hidden;
+}
+
+.admin-layout, .customer-layout {
+  border:none !important;
+}
+
+.card, .stat-card, .stat-box, .profile-card, .chart-card, .settings-card, .customers-card {
+  border: none !important;
+  background: rgba(15,23,42,.85);
+  box-shadow: 0 18px 45px rgba(0,0,0,.35);
+}
+
+input, select, textarea, button {
+  border: none !important;
+  outline:none;
+}
+
+button {
+  cursor:pointer;
+}
+
+table, th, td {
+  border-color:transparent !important;
+}
+

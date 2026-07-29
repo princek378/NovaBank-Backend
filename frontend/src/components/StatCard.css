@@ -1,0 +1,180 @@
+.stat-card{
+
+
+background:
+
+linear-gradient(
+145deg,
+#0f172a,
+#1e293b
+);
+
+
+padding:25px;
+
+
+border-radius:22px;
+
+
+border:
+
+1px solid rgba(56,189,248,0.25);
+
+
+
+display:flex;
+
+
+align-items:center;
+
+
+gap:20px;
+
+
+
+box-shadow:
+
+0 15px 35px rgba(0,0,0,.35);
+
+
+
+transition:.3s;
+
+
+}
+
+
+
+
+
+.stat-card:hover{
+
+
+transform:translateY(-8px);
+
+
+
+box-shadow:
+
+0 25px 45px rgba(0,0,0,.5);
+
+
+}
+
+
+
+
+
+.stat-icon{
+
+
+width:65px;
+
+
+height:65px;
+
+
+border-radius:18px;
+
+
+
+background:
+
+linear-gradient(
+135deg,
+#2563eb,
+#38bdf8
+);
+
+
+
+display:flex;
+
+
+align-items:center;
+
+
+justify-content:center;
+
+
+
+font-size:32px;
+
+
+}
+
+
+
+
+
+.stat-content h3{
+
+
+margin:0;
+
+
+font-size:16px;
+
+
+color:#94a3b8;
+
+
+}
+
+
+
+
+
+.stat-content h1{
+
+
+margin-top:12px;
+
+
+font-size:35px;
+
+
+color:white;
+
+
+}
+
+/* ===== NovaBank Phase 2 Fintech UI Override ===== */
+
+* {
+  outline: none !important;
+}
+
+html, body, #root {
+  min-height:100%;
+  margin:0;
+  background:#020617;
+}
+
+body {
+  overflow-x:hidden;
+}
+
+.admin-layout, .customer-layout {
+  border:none !important;
+}
+
+.card, .stat-card, .stat-box, .profile-card, .chart-card, .settings-card, .customers-card {
+  border: none !important;
+  background: rgba(15,23,42,.85);
+  box-shadow: 0 18px 45px rgba(0,0,0,.35);
+}
+
+input, select, textarea, button {
+  border: none !important;
+  outline:none;
+}
+
+button {
+  cursor:pointer;
+}
+
+table, th, td {
+  border-color:transparent !important;
+}
+
