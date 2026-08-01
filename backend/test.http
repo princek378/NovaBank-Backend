@@ -1,0 +1,7 @@
+POST http://127.0.0.1:5000/api/transactions/deposit
+Content-Type: application/json
+
+{
+    "account_number": "11110203303333",
+    "amount": 500
+}
