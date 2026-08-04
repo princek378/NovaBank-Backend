@@ -1,3 +1,4 @@
+import os
 from flask import Flask, jsonify
 from flask_cors import CORS
 from flask_migrate import Migrate
@@ -26,12 +27,19 @@ app = Flask(__name__)
 
 CORS(app, resources={r"/api/*": {"origins": "*"}}, supports_credentials=True)
 
-app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///novabank.db"
+# Use DATABASE_URL from environment (Neon / Render). Fallback to SQLite for local only.
+database_url = os.environ.get("DATABASE_URL", "sqlite:///novabank.db")
+if database_url.startswith("postgres://"):
+    database_url = database_url.replace("postgres://", "postgresql://", 1)
+
+app.config["SQLALCHEMY_DATABASE_URI"] = database_url
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 db.init_app(app)
 migrate = Migrate(app, db)
 
-app.config["JWT_SECRET_KEY"] = "novabank-secret-key-change-in-production"
+app.config["JWT_SECRET_KEY"] = os.environ.get(
+    "JWT_SECRET_KEY", "novabank-secret-key-change-in-production"
+)
 app.config["JWT_ACCESS_TOKEN_EXPIRES"] = False
 jwt = JWTManager(app)
 
@@ -66,22 +74,23 @@ def seed_default_admin():
         )
         db.session.add(admin)
         db.session.commit()
-        print("Default admin created → username: admin  password: 12345678")
+        print("Default admin created → email: admin@novabank.com  password: 12345678")
     else:
         print("Admin already exists")
 
-
 def ensure_message_columns():
-    """Add is_read column to message table if missing (SQLite)."""
+    """Add is_read column if missing (works on SQLite; safe no-op on Postgres)."""
     try:
-        from sqlalchemy import text
-        with db.engine.connect() as conn:
-            rows = conn.execute(text("PRAGMA table_info(message)")).fetchall()
-            cols = [r[1] for r in rows]
-            if "is_read" not in cols:
-                conn.execute(text("ALTER TABLE message ADD COLUMN is_read BOOLEAN DEFAULT 0"))
+        from sqlalchemy import text, inspect
+        insp = inspect(db.engine)
+        if "message" not in insp.get_table_names():
+            return
+        cols = [c["name"] for c in insp.get_columns("message")]
+        if "is_read" not in cols:
+            with db.engine.connect() as conn:
+                conn.execute(text("ALTER TABLE message ADD COLUMN is_read BOOLEAN DEFAULT FALSE"))
                 conn.commit()
-                print("Added is_read column to message table")
+            print("Added is_read column to message table")
     except Exception as e:
         print("ensure_message_columns:", e)
 
