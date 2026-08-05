@@ -79,12 +79,28 @@ app.register_blueprint(notification_bp)
 
 @app.route("/")
 def home():
-    return jsonify({"message": "NovaBank API Running", "status": "ok"})
+    # Database check is on the home page so we can always see it
+    db_type = "postgresql" if "postgresql" in database_url else "sqlite"
+    db_ok = False
+    db_error = None
+    try:
+        db.session.execute(text("SELECT 1"))
+        db_ok = True
+    except Exception as e:
+        db_error = str(e)
+
+    return jsonify({
+        "message": "NovaBank API Running",
+        "status": "ok",
+        "database": db_type,
+        "database_connected": db_ok,
+        "database_host": _safe,
+        "database_error": db_error,
+    })
 
 
 @app.route("/api/health")
 def health():
-    """Check which database is actually connected."""
     try:
         db.session.execute(text("SELECT 1"))
         db_type = "postgresql" if "postgresql" in database_url else "sqlite"
@@ -99,7 +115,6 @@ def health():
 
 @app.errorhandler(Exception)
 def handle_error(error):
-    # Keep normal HTTP errors (404, 405, etc.) as they are
     if isinstance(error, HTTPException):
         return jsonify({"error": error.description}), error.code
     print(error)
