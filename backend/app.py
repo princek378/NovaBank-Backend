@@ -4,6 +4,7 @@ from flask_cors import CORS
 from flask_migrate import Migrate
 from flask_jwt_extended import JWTManager
 from werkzeug.security import generate_password_hash
+from werkzeug.exceptions import HTTPException
 from database import db
 from sqlalchemy import text, inspect
 
@@ -98,8 +99,11 @@ def health():
 
 @app.errorhandler(Exception)
 def handle_error(error):
+    # Keep normal HTTP errors (404, 405, etc.) as they are
+    if isinstance(error, HTTPException):
+        return jsonify({"error": error.description}), error.code
     print(error)
-    return {"error": str(error)}, 500
+    return jsonify({"error": str(error)}), 500
 
 
 def seed_default_admin():
