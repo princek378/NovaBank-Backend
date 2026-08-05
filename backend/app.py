@@ -5,7 +5,7 @@ from flask_migrate import Migrate
 from flask_jwt_extended import JWTManager
 from werkzeug.security import generate_password_hash
 from database import db
-from sqlalchemy import text
+from sqlalchemy import text, inspect
 
 from models.user import User
 from models.account import Account
@@ -33,7 +33,10 @@ database_url = os.environ.get("DATABASE_URL", "").strip()
 
 if not database_url:
     if os.environ.get("RENDER"):
-        raise RuntimeError("DATABASE_URL is not set on Render. Add it in Environment.")
+        raise RuntimeError(
+            "DATABASE_URL is not set on Render. "
+            "Add DATABASE_URL in Environment settings."
+        )
     database_url = "sqlite:///novabank.db"
     print("WARNING: Using local SQLite (dev only)")
 
@@ -53,8 +56,8 @@ app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
 db.init_app(app)
 migrate = Migrate(app, db)
 
-_safe_host = database_url.split("@")[-1] if "@" in database_url else database_url
-print("Database host:", _safe_host)
+_safe = database_url.split("@")[-1] if "@" in database_url else database_url
+print("Database host:", _safe)
 
 app.config["JWT_SECRET_KEY"] = os.environ.get(
     "JWT_SECRET_KEY", "novabank-secret-key-change-in-production"
@@ -80,13 +83,14 @@ def home():
 
 @app.route("/api/health")
 def health():
+    """Check which database is actually connected."""
     try:
         db.session.execute(text("SELECT 1"))
         db_type = "postgresql" if "postgresql" in database_url else "sqlite"
         return jsonify({
             "status": "ok",
             "database": db_type,
-            "host": _safe_host,
+            "host": _safe,
         })
     except Exception as e:
         return jsonify({"status": "error", "error": str(e)}), 500
@@ -117,7 +121,6 @@ def seed_default_admin():
 
 def ensure_message_columns():
     try:
-        from sqlalchemy import inspect
         insp = inspect(db.engine)
         if "message" not in insp.get_table_names():
             return
