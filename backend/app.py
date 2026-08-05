@@ -5,6 +5,7 @@ from flask_migrate import Migrate
 from flask_jwt_extended import JWTManager
 from werkzeug.security import generate_password_hash
 from database import db
+from sqlalchemy import text
 
 from models.user import User
 from models.account import Account
@@ -30,37 +31,30 @@ CORS(app, resources={r"/api/*": {"origins": "*"}}, supports_credentials=True)
 # ---------- DATABASE ----------
 database_url = os.environ.get("DATABASE_URL", "").strip()
 
-# On Render we MUST use Postgres. Do not silently fall back to SQLite.
 if not database_url:
-    # Only allow SQLite when running on your own computer
     if os.environ.get("RENDER"):
-        raise RuntimeError(
-            "DATABASE_URL is not set on Render. "
-            "Add DATABASE_URL in Environment settings."
-        )
+        raise RuntimeError("DATABASE_URL is not set on Render. Add it in Environment.")
     database_url = "sqlite:///novabank.db"
     print("WARNING: Using local SQLite (dev only)")
 
 if database_url.startswith("postgres://"):
     database_url = database_url.replace("postgres://", "postgresql://", 1)
 
-# Neon needs SSL
 if database_url.startswith("postgresql://") and "sslmode=" not in database_url:
     database_url += ("&" if "?" in database_url else "?") + "sslmode=require"
 
 app.config["SQLALCHEMY_DATABASE_URI"] = database_url
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
-    "pool_pre_ping": True,   # reconnect if Neon slept
+    "pool_pre_ping": True,
     "pool_recycle": 300,
 }
 
 db.init_app(app)
 migrate = Migrate(app, db)
 
-# Safe log (hides password)
-_safe = database_url.split("@")[-1] if "@" in database_url else database_url
-print(f"Database host: {_safe}")
+_safe_host = database_url.split("@")[-1] if "@" in database_url else database_url
+print("Database host:", _safe_host)
 
 app.config["JWT_SECRET_KEY"] = os.environ.get(
     "JWT_SECRET_KEY", "novabank-secret-key-change-in-production"
@@ -86,14 +80,13 @@ def home():
 
 @app.route("/api/health")
 def health():
-    """Check which database is actually connected."""
     try:
-        db.session.execute(db.text("SELECT 1"))
+        db.session.execute(text("SELECT 1"))
         db_type = "postgresql" if "postgresql" in database_url else "sqlite"
         return jsonify({
             "status": "ok",
             "database": db_type,
-            "host": _safe,
+            "host": _safe_host,
         })
     except Exception as e:
         return jsonify({"status": "error", "error": str(e)}), 500
@@ -124,7 +117,7 @@ def seed_default_admin():
 
 def ensure_message_columns():
     try:
-        from sqlalchemy import text, inspect
+        from sqlalchemy import inspect
         insp = inspect(db.engine)
         if "message" not in insp.get_table_names():
             return
