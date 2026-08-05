@@ -27,15 +27,40 @@ app = Flask(__name__)
 
 CORS(app, resources={r"/api/*": {"origins": "*"}}, supports_credentials=True)
 
-# Use DATABASE_URL from environment (Neon / Render). Fallback to SQLite for local only.
-database_url = os.environ.get("DATABASE_URL", "sqlite:///novabank.db")
+# ---------- DATABASE ----------
+database_url = os.environ.get("DATABASE_URL", "").strip()
+
+# On Render we MUST use Postgres. Do not silently fall back to SQLite.
+if not database_url:
+    # Only allow SQLite when running on your own computer
+    if os.environ.get("RENDER"):
+        raise RuntimeError(
+            "DATABASE_URL is not set on Render. "
+            "Add DATABASE_URL in Environment settings."
+        )
+    database_url = "sqlite:///novabank.db"
+    print("WARNING: Using local SQLite (dev only)")
+
 if database_url.startswith("postgres://"):
     database_url = database_url.replace("postgres://", "postgresql://", 1)
 
+# Neon needs SSL
+if database_url.startswith("postgresql://") and "sslmode=" not in database_url:
+    database_url += ("&" if "?" in database_url else "?") + "sslmode=require"
+
 app.config["SQLALCHEMY_DATABASE_URI"] = database_url
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
+    "pool_pre_ping": True,   # reconnect if Neon slept
+    "pool_recycle": 300,
+}
+
 db.init_app(app)
 migrate = Migrate(app, db)
+
+# Safe log (hides password)
+_safe = database_url.split("@")[-1] if "@" in database_url else database_url
+print(f"Database host: {_safe}")
 
 app.config["JWT_SECRET_KEY"] = os.environ.get(
     "JWT_SECRET_KEY", "novabank-secret-key-change-in-production"
@@ -53,14 +78,32 @@ app.register_blueprint(settings_bp)
 app.register_blueprint(report_bp)
 app.register_blueprint(notification_bp)
 
+
 @app.route("/")
 def home():
     return jsonify({"message": "NovaBank API Running", "status": "ok"})
+
+
+@app.route("/api/health")
+def health():
+    """Check which database is actually connected."""
+    try:
+        db.session.execute(db.text("SELECT 1"))
+        db_type = "postgresql" if "postgresql" in database_url else "sqlite"
+        return jsonify({
+            "status": "ok",
+            "database": db_type,
+            "host": _safe,
+        })
+    except Exception as e:
+        return jsonify({"status": "error", "error": str(e)}), 500
+
 
 @app.errorhandler(Exception)
 def handle_error(error):
     print(error)
     return {"error": str(error)}, 500
+
 
 def seed_default_admin():
     admin = User.query.filter_by(role="Admin").first()
@@ -78,8 +121,8 @@ def seed_default_admin():
     else:
         print("Admin already exists")
 
+
 def ensure_message_columns():
-    """Add is_read column if missing (works on SQLite; safe no-op on Postgres)."""
     try:
         from sqlalchemy import text, inspect
         insp = inspect(db.engine)
@@ -88,11 +131,14 @@ def ensure_message_columns():
         cols = [c["name"] for c in insp.get_columns("message")]
         if "is_read" not in cols:
             with db.engine.connect() as conn:
-                conn.execute(text("ALTER TABLE message ADD COLUMN is_read BOOLEAN DEFAULT FALSE"))
+                conn.execute(
+                    text("ALTER TABLE message ADD COLUMN is_read BOOLEAN DEFAULT FALSE")
+                )
                 conn.commit()
             print("Added is_read column to message table")
     except Exception as e:
         print("ensure_message_columns:", e)
+
 
 with app.app_context():
     db.create_all()
