@@ -4,6 +4,7 @@ from database import db
 from models.user import User
 from models.account import Account
 from models.transaction import Transaction
+from models.message import Message
 from datetime import datetime
 import uuid
 
@@ -19,6 +20,9 @@ def parse_date(value):
         return None
 
 
+# =====================================
+# DASHBOARD STATS
+# =====================================
 @admin_bp.route("/api/admin/stats", methods=["GET"])
 def admin_stats():
     customers = User.query.filter(User.role != "Admin").count()
@@ -31,6 +35,9 @@ def admin_stats():
     })
 
 
+# =====================================
+# GET ALL CUSTOMERS
+# =====================================
 @admin_bp.route("/api/admin/customers", methods=["GET"])
 def get_customers():
     users = User.query.filter(User.role != "Admin").all()
@@ -50,6 +57,9 @@ def get_customers():
     return jsonify(result)
 
 
+# =====================================
+# GET CUSTOMER PROFILE (+ transactions)
+# =====================================
 @admin_bp.route("/api/admin/customers/<int:id>", methods=["GET"])
 def get_customer_profile(id):
     user = User.query.get(id)
@@ -102,6 +112,9 @@ def get_customer_profile(id):
     })
 
 
+# =====================================
+# UPDATE CUSTOMER + ACCOUNT DETAILS
+# =====================================
 @admin_bp.route("/api/admin/customers/<int:id>", methods=["PUT"])
 def update_customer(id):
     user = User.query.get(id)
@@ -133,13 +146,11 @@ def update_customer(id):
     if data.get("password"):
         user.password = generate_password_hash(data["password"])
 
-    # Always keep as Customer
     user.role = "Customer"
 
     account = Account.query.filter_by(user_id=user.id).first()
     if account:
         new_num = str(data.get("account_number") or "").strip()
-        # Never save empty or "N/A"
         if new_num and new_num.upper() != "N/A":
             taken = Account.query.filter(
                 Account.account_number == new_num, Account.id != account.id
@@ -147,7 +158,6 @@ def update_customer(id):
             if taken:
                 return jsonify({"message": "Account number already in use"}), 400
             account.account_number = new_num
-
         if data.get("account_type"):
             account.account_type = data["account_type"]
         if data.get("currency"):
@@ -168,6 +178,9 @@ def update_customer(id):
     return jsonify({"message": "Customer updated successfully"})
 
 
+# =====================================
+# CREATE CUSTOMER
+# =====================================
 @admin_bp.route("/api/admin/customers", methods=["POST"])
 def create_customer():
     data = request.get_json() or {}
@@ -182,6 +195,7 @@ def create_customer():
 
     if not first_name or not last_name or not email or not password:
         return jsonify({"message": "Required fields missing"}), 400
+
     if User.query.filter_by(email=email).first():
         return jsonify({"message": "Email already exists"}), 400
 
@@ -213,6 +227,9 @@ def create_customer():
     }), 201
 
 
+# =====================================
+# ADMIN DEPOSIT
+# =====================================
 @admin_bp.route("/api/admin/customers/<int:id>/deposit", methods=["POST"])
 def admin_deposit(id):
     user = User.query.get(id)
@@ -244,6 +261,9 @@ def admin_deposit(id):
     return jsonify({"message": "Deposit successful", "balance": account.balance, "reference": ref})
 
 
+# =====================================
+# ADMIN WITHDRAW
+# =====================================
 @admin_bp.route("/api/admin/customers/<int:id>/withdraw", methods=["POST"])
 def admin_withdraw(id):
     user = User.query.get(id)
@@ -277,6 +297,9 @@ def admin_withdraw(id):
     return jsonify({"message": "Withdrawal successful", "balance": account.balance, "reference": ref})
 
 
+# =====================================
+# ADMIN TRANSFER
+# =====================================
 @admin_bp.route("/api/admin/customers/<int:id>/transfer", methods=["POST"])
 def admin_transfer(id):
     user = User.query.get(id)
@@ -334,6 +357,9 @@ def admin_transfer(id):
     })
 
 
+# =====================================
+# UPDATE TRANSACTION
+# =====================================
 @admin_bp.route("/api/admin/transactions/<int:tx_id>", methods=["PUT"])
 def update_transaction(tx_id):
     tx = Transaction.query.get(tx_id)
@@ -344,7 +370,10 @@ def update_transaction(tx_id):
     if "description" in data:
         tx.description = data["description"]
     if "amount" in data and data["amount"] is not None:
-        tx.amount = float(data["amount"])
+        try:
+            tx.amount = float(data["amount"])
+        except (TypeError, ValueError):
+            pass
     if data.get("type"):
         tx.transaction_type = data["type"]
     if data.get("status"):
@@ -352,7 +381,10 @@ def update_transaction(tx_id):
     if "related_account" in data:
         tx.related_account = data["related_account"]
     if "balance_after" in data and data["balance_after"] is not None:
-        tx.balance_after = float(data["balance_after"])
+        try:
+            tx.balance_after = float(data["balance_after"])
+        except (TypeError, ValueError):
+            pass
     if data.get("reference"):
         tx.transaction_reference = data["reference"]
     if data.get("date"):
@@ -366,6 +398,9 @@ def update_transaction(tx_id):
     return jsonify({"message": "Transaction updated"})
 
 
+# =====================================
+# DELETE TRANSACTION
+# =====================================
 @admin_bp.route("/api/admin/transactions/<int:tx_id>", methods=["DELETE"])
 def delete_transaction(tx_id):
     tx = Transaction.query.get(tx_id)
@@ -376,6 +411,9 @@ def delete_transaction(tx_id):
     return jsonify({"message": "Transaction deleted"})
 
 
+# =====================================
+# FREEZE / UNFREEZE
+# =====================================
 @admin_bp.route("/api/admin/customers/<int:id>/freeze", methods=["PUT"])
 def freeze_customer(id):
     user = User.query.get(id)
@@ -396,10 +434,11 @@ def unfreeze_customer(id):
     return jsonify({"message": "Customer unfrozen"})
 
 
+# =====================================
+# DELETE CUSTOMER (fixed for PostgreSQL)
+# =====================================
 @admin_bp.route("/api/admin/customers/<int:id>", methods=["DELETE"])
 def delete_customer(id):
-    from sqlalchemy import text as sql_text
-
     user = User.query.filter_by(id=id).first()
     if not user:
         return jsonify({"message": "Customer not found"}), 404
@@ -407,39 +446,32 @@ def delete_customer(id):
         return jsonify({"message": "Cannot delete admin account"}), 400
 
     try:
+        # 1) Messages
+        Message.query.filter_by(user_id=user.id).delete(synchronize_session=False)
+
+        # 2) Notifications (optional table)
+        try:
+            from models.notification import Notification
+            Notification.query.filter_by(user_id=user.id).delete(synchronize_session=False)
+        except Exception:
+            pass
+
+        # 3) Transactions then accounts
         accounts = Account.query.filter_by(user_id=user.id).all()
-        account_ids = [a.id for a in accounts]
-        if account_ids:
-            for aid in account_ids:
-                db.session.execute(
-                    sql_text('DELETE FROM "transaction" WHERE account_id = :aid'),
-                    {"aid": aid},
-                )
-            for aid in account_ids:
-                db.session.execute(
-                    sql_text("DELETE FROM account WHERE id = :aid"),
-                    {"aid": aid},
-                )
-        try:
-            db.session.execute(
-                sql_text("DELETE FROM message WHERE user_id = :uid"),
-                {"uid": user.id},
-            )
-        except Exception:
-            pass
-        try:
-            db.session.execute(
-                sql_text("DELETE FROM notification WHERE user_id = :uid"),
-                {"uid": user.id},
-            )
-        except Exception:
-            pass
-        db.session.execute(
-            sql_text('DELETE FROM "user" WHERE id = :uid'),
-            {"uid": user.id},
-        )
+        for acc in accounts:
+            Transaction.query.filter_by(account_id=acc.id).delete(synchronize_session=False)
+            db.session.delete(acc)
+
+        # 4) User
+        db.session.delete(user)
         db.session.commit()
+
         return jsonify({"message": "Customer deleted successfully"}), 200
+
     except Exception as e:
         db.session.rollback()
-        return jsonify({"message": "Failed to delete customer", "error": str(e)}), 500
+        print("Delete customer error:", repr(e))
+        return jsonify({
+            "message": "Failed to delete customer",
+            "error": str(e),
+        }), 500
