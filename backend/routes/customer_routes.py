@@ -6,6 +6,7 @@ from models.transaction import Transaction
 
 customer_bp = Blueprint("customer", __name__)
 
+
 @customer_bp.route("/api/customer/profile", methods=["GET"])
 @jwt_required()
 def customer_profile():
@@ -17,7 +18,12 @@ def customer_profile():
     account = Account.query.filter_by(user_id=user.id).first()
     transactions = []
     if account:
-        txs = Transaction.query.filter_by(account_id=account.id).order_by(Transaction.date.desc()).limit(20).all()
+        txs = (
+            Transaction.query.filter_by(account_id=account.id)
+            .order_by(Transaction.date.desc())
+            .limit(20)
+            .all()
+        )
         for tx in txs:
             transactions.append({
                 "id": tx.id,
@@ -37,12 +43,14 @@ def customer_profile():
         "address": user.address,
         "role": user.role,
         "status": getattr(user, "status", "Active"),
+        "created_at": user.created_at.isoformat() if getattr(user, "created_at", None) else None,
         "account": {
             "account_number": account.account_number if account else None,
             "balance": account.balance if account else 0,
             "account_type": account.account_type if account else "Savings",
             "currency": account.currency if account else "USD",
             "status": account.status if account else "Active",
+            "created_at": account.created_at.isoformat() if account and getattr(account, "created_at", None) else None,
         },
         "transactions": transactions,
     })
