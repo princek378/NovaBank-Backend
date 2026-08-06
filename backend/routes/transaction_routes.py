@@ -23,40 +23,6 @@ def is_frozen(account):
     return status and status.lower() == "frozen"
 
 
-def validate_codes(data):
-    """
-    Check IMF/COT only if AdminSettings has those fields.
-    Never crash if columns are missing.
-    """
-    try:
-        from models.admin_settings import AdminSettings
-        settings = AdminSettings.query.first()
-        if not settings:
-            return None
-
-        # If model/DB has no these attributes, skip quietly
-        if not hasattr(settings, "require_imf") and not hasattr(settings, "imf_code"):
-            return None
-
-        require_imf = bool(getattr(settings, "require_imf", False))
-        require_cot = bool(getattr(settings, "require_cot", False))
-        imf_expected = (getattr(settings, "imf_code", None) or "").strip()
-        cot_expected = (getattr(settings, "cot_code", None) or "").strip()
-
-        if require_imf:
-            imf = (data.get("imf_code") or "").strip()
-            if not imf or (imf_expected and imf != imf_expected):
-                return "Invalid IMF code"
-
-        if require_cot:
-            cot = (data.get("cot_code") or "").strip()
-            if not cot or (cot_expected and cot != cot_expected):
-                return "Invalid COT code"
-    except Exception as e:
-        print("validate_codes skipped:", e)
-    return None
-
-
 @transaction_bp.route("/api/transactions/<int:account_id>", methods=["GET"])
 def get_transactions(account_id):
     transactions = (
@@ -126,7 +92,7 @@ def deposit():
 
     account.balance += amount
     reference = str(uuid.uuid4())[:12].upper()
-    tx = Transaction(
+    db.session.add(Transaction(
         account_id=account.id,
         transaction_reference=reference,
         description="Cash Deposit",
@@ -134,8 +100,7 @@ def deposit():
         transaction_type="Deposit",
         balance_after=account.balance,
         created_by="Customer",
-    )
-    db.session.add(tx)
+    ))
     db.session.commit()
     return jsonify({"message": "Deposit successful", "reference": reference, "balance": account.balance})
 
@@ -159,7 +124,7 @@ def withdraw():
 
     account.balance -= amount
     reference = str(uuid.uuid4())[:12].upper()
-    tx = Transaction(
+    db.session.add(Transaction(
         account_id=account.id,
         transaction_reference=reference,
         description="Cash Withdrawal",
@@ -167,8 +132,7 @@ def withdraw():
         transaction_type="Withdrawal",
         balance_after=account.balance,
         created_by="Customer",
-    )
-    db.session.add(tx)
+    ))
     db.session.commit()
     return jsonify({"message": "Withdrawal successful", "balance": account.balance, "reference": reference})
 
@@ -177,7 +141,7 @@ def withdraw():
 def transfer():
     try:
         data = request.json or {}
-        sender_number = data.get("from_account")
+        sender_number = (data.get("from_account") or "").strip()
         receiver_number = (data.get("to_account") or "").strip()
         transfer_type = (data.get("transfer_type") or "local").lower()
         bank_name = (data.get("bank_name") or "").strip()
@@ -188,16 +152,15 @@ def transfer():
         except (TypeError, ValueError):
             return jsonify({"message": "Invalid amount"}), 400
 
+        if not sender_number:
+            return jsonify({"message": "Sender account missing. Please log in again."}), 400
+
         sender = Account.query.filter_by(account_number=sender_number).first()
         if not sender:
             return jsonify({"message": "Sender account not found"}), 404
 
         if is_frozen(sender):
             return jsonify({"message": "Your account is frozen. Transactions are not allowed."}), 403
-
-        code_error = validate_codes(data)
-        if code_error:
-            return jsonify({"message": code_error}), 403
 
         if amount <= 0:
             return jsonify({"message": "Invalid amount"}), 400
@@ -224,7 +187,7 @@ def transfer():
                 Transaction(
                     account_id=sender.id,
                     transaction_reference=out_ref,
-                    description=f"Local transfer to {receiver.account_number}"[:150],
+                    description=("Local to " + receiver.account_number)[:150],
                     amount=amount,
                     transaction_type="Transfer Out",
                     related_account=(receiver.account_number or "")[:20],
@@ -234,7 +197,7 @@ def transfer():
                 Transaction(
                     account_id=receiver.id,
                     transaction_reference=in_ref,
-                    description=f"Local transfer from {sender.account_number}"[:150],
+                    description=("Local from " + sender.account_number)[:150],
                     amount=amount,
                     transaction_type="Transfer In",
                     related_account=(sender.account_number or "")[:20],
@@ -266,27 +229,19 @@ def transfer():
             return jsonify({"message": "Enter beneficiary account / wallet ID"}), 400
 
         sender.balance -= amount
-
-        desc = f"Intl via {bank_name} to {receiver_number}"
-        if beneficiary_name:
-            desc += f" ({beneficiary_name})"
-        desc = desc[:150]
-
-        # related_account column is only 20 characters
+        desc = ("Intl " + bank_name + " " + receiver_number)[:150]
         related = (bank_name[:8] + ":" + receiver_number)[:20]
 
-        db.session.add(
-            Transaction(
-                account_id=sender.id,
-                transaction_reference=out_ref,
-                description=desc,
-                amount=amount,
-                transaction_type="Intl Transfer",  # keep under 30 chars
-                related_account=related,
-                balance_after=sender.balance,
-                created_by="Customer",
-            )
-        )
+        db.session.add(Transaction(
+            account_id=sender.id,
+            transaction_reference=out_ref,
+            description=desc,
+            amount=amount,
+            transaction_type="Intl Transfer",
+            related_account=related,
+            balance_after=sender.balance,
+            created_by="Customer",
+        ))
         db.session.commit()
 
         return jsonify({
