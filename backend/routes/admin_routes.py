@@ -14,15 +14,11 @@ def parse_date(value):
     if not value:
         return None
     try:
-        # accepts "2026-08-05" or full ISO
         return datetime.fromisoformat(str(value).replace("Z", ""))
     except Exception:
         return None
 
 
-# =====================================
-# DASHBOARD STATS
-# =====================================
 @admin_bp.route("/api/admin/stats", methods=["GET"])
 def admin_stats():
     customers = User.query.filter(User.role != "Admin").count()
@@ -35,9 +31,6 @@ def admin_stats():
     })
 
 
-# =====================================
-# GET ALL CUSTOMERS
-# =====================================
 @admin_bp.route("/api/admin/customers", methods=["GET"])
 def get_customers():
     users = User.query.filter(User.role != "Admin").all()
@@ -57,14 +50,13 @@ def get_customers():
     return jsonify(result)
 
 
-# =====================================
-# GET CUSTOMER PROFILE (+ transactions)
-# =====================================
 @admin_bp.route("/api/admin/customers/<int:id>", methods=["GET"])
 def get_customer_profile(id):
     user = User.query.get(id)
     if not user:
         return jsonify({"message": "Customer not found"}), 404
+    if (getattr(user, "role", None) or "") == "Admin":
+        return jsonify({"message": "Cannot view admin as customer"}), 400
 
     account = Account.query.filter_by(user_id=user.id).first()
     transactions = []
@@ -110,59 +102,63 @@ def get_customer_profile(id):
     })
 
 
-# =====================================
-# UPDATE CUSTOMER + ACCOUNT DETAILS
-# =====================================
 @admin_bp.route("/api/admin/customers/<int:id>", methods=["PUT"])
 def update_customer(id):
     user = User.query.get(id)
     if not user:
         return jsonify({"message": "Customer not found"}), 404
+    if (getattr(user, "role", None) or "") == "Admin":
+        return jsonify({"message": "Cannot edit admin account here"}), 400
 
     data = request.get_json() or {}
 
-    if "name" in data and data["name"]:
-        user.name = data["name"].strip()
-    if "email" in data and data["email"]:
-        email = data["email"].strip().lower()
+    if data.get("name"):
+        user.name = str(data["name"]).strip()
+    if data.get("email"):
+        email = str(data["email"]).strip().lower()
         exists = User.query.filter(User.email == email, User.id != user.id).first()
         if exists:
             return jsonify({"message": "Email already in use"}), 400
         user.email = email
     if "phone" in data:
-        user.phone = data["phone"]
+        user.phone = data["phone"] or None
     if "address" in data:
-        user.address = data["address"]
-    if "status" in data and data["status"]:
+        user.address = data["address"] or None
+    if data.get("status") in ("Active", "Frozen"):
         user.status = data["status"]
-    if "created_at" in data:
+    if data.get("created_at"):
         parsed = parse_date(data["created_at"])
         if parsed:
             user.created_at = parsed
     if data.get("password"):
         user.password = generate_password_hash(data["password"])
 
+    # Always keep as Customer
+    user.role = "Customer"
+
     account = Account.query.filter_by(user_id=user.id).first()
     if account:
-        if "account_number" in data and data["account_number"]:
-            new_num = str(data["account_number"]).strip()
+        new_num = str(data.get("account_number") or "").strip()
+        # Never save empty or "N/A"
+        if new_num and new_num.upper() != "N/A":
             taken = Account.query.filter(
                 Account.account_number == new_num, Account.id != account.id
             ).first()
             if taken:
                 return jsonify({"message": "Account number already in use"}), 400
             account.account_number = new_num
-        if "account_type" in data and data["account_type"]:
+
+        if data.get("account_type"):
             account.account_type = data["account_type"]
-        if "currency" in data and data["currency"]:
+        if data.get("currency"):
             account.currency = data["currency"]
-        if "account_status" in data and data["account_status"]:
+        if data.get("account_status") in ("Active", "Frozen"):
             account.status = data["account_status"]
-        if "account_created_at" in data:
+        if data.get("account_created_at"):
             parsed = parse_date(data["account_created_at"])
             if parsed:
                 account.created_at = parsed
-        if "balance" in data and data["balance"] is not None:
+        if data.get("balance") is not None and str(data.get("balance")).strip() != "":
             try:
                 account.balance = float(data["balance"])
             except (TypeError, ValueError):
@@ -172,9 +168,6 @@ def update_customer(id):
     return jsonify({"message": "Customer updated successfully"})
 
 
-# =====================================
-# CREATE CUSTOMER
-# =====================================
 @admin_bp.route("/api/admin/customers", methods=["POST"])
 def create_customer():
     data = request.get_json() or {}
@@ -189,7 +182,6 @@ def create_customer():
 
     if not first_name or not last_name or not email or not password:
         return jsonify({"message": "Required fields missing"}), 400
-
     if User.query.filter_by(email=email).first():
         return jsonify({"message": "Email already exists"}), 400
 
@@ -221,9 +213,6 @@ def create_customer():
     }), 201
 
 
-# =====================================
-# ADMIN DEPOSIT
-# =====================================
 @admin_bp.route("/api/admin/customers/<int:id>/deposit", methods=["POST"])
 def admin_deposit(id):
     user = User.query.get(id)
@@ -241,7 +230,7 @@ def admin_deposit(id):
 
     account.balance += amount
     ref = str(uuid.uuid4())[:12].upper()
-    tx = Transaction(
+    db.session.add(Transaction(
         account_id=account.id,
         transaction_reference=ref,
         description=description,
@@ -250,15 +239,11 @@ def admin_deposit(id):
         balance_after=account.balance,
         created_by="Admin",
         status="Completed",
-    )
-    db.session.add(tx)
+    ))
     db.session.commit()
     return jsonify({"message": "Deposit successful", "balance": account.balance, "reference": ref})
 
 
-# =====================================
-# ADMIN WITHDRAW
-# =====================================
 @admin_bp.route("/api/admin/customers/<int:id>/withdraw", methods=["POST"])
 def admin_withdraw(id):
     user = User.query.get(id)
@@ -278,7 +263,7 @@ def admin_withdraw(id):
 
     account.balance -= amount
     ref = str(uuid.uuid4())[:12].upper()
-    tx = Transaction(
+    db.session.add(Transaction(
         account_id=account.id,
         transaction_reference=ref,
         description=description,
@@ -287,15 +272,11 @@ def admin_withdraw(id):
         balance_after=account.balance,
         created_by="Admin",
         status="Completed",
-    )
-    db.session.add(tx)
+    ))
     db.session.commit()
     return jsonify({"message": "Withdrawal successful", "balance": account.balance, "reference": ref})
 
 
-# =====================================
-# ADMIN TRANSFER (from this customer to another account)
-# =====================================
 @admin_bp.route("/api/admin/customers/<int:id>/transfer", methods=["POST"])
 def admin_transfer(id):
     user = User.query.get(id)
@@ -353,9 +334,6 @@ def admin_transfer(id):
     })
 
 
-# =====================================
-# UPDATE TRANSACTION
-# =====================================
 @admin_bp.route("/api/admin/transactions/<int:tx_id>", methods=["PUT"])
 def update_transaction(tx_id):
     tx = Transaction.query.get(tx_id)
@@ -367,17 +345,17 @@ def update_transaction(tx_id):
         tx.description = data["description"]
     if "amount" in data and data["amount"] is not None:
         tx.amount = float(data["amount"])
-    if "type" in data and data["type"]:
+    if data.get("type"):
         tx.transaction_type = data["type"]
-    if "status" in data and data["status"]:
+    if data.get("status"):
         tx.status = data["status"]
     if "related_account" in data:
         tx.related_account = data["related_account"]
     if "balance_after" in data and data["balance_after"] is not None:
         tx.balance_after = float(data["balance_after"])
-    if "reference" in data and data["reference"]:
+    if data.get("reference"):
         tx.transaction_reference = data["reference"]
-    if "date" in data:
+    if data.get("date"):
         parsed = parse_date(data["date"])
         if parsed:
             tx.date = parsed
@@ -388,9 +366,6 @@ def update_transaction(tx_id):
     return jsonify({"message": "Transaction updated"})
 
 
-# =====================================
-# DELETE TRANSACTION
-# =====================================
 @admin_bp.route("/api/admin/transactions/<int:tx_id>", methods=["DELETE"])
 def delete_transaction(tx_id):
     tx = Transaction.query.get(tx_id)
@@ -401,9 +376,6 @@ def delete_transaction(tx_id):
     return jsonify({"message": "Transaction deleted"})
 
 
-# =====================================
-# FREEZE / UNFREEZE
-# =====================================
 @admin_bp.route("/api/admin/customers/<int:id>/freeze", methods=["PUT"])
 def freeze_customer(id):
     user = User.query.get(id)
@@ -424,9 +396,6 @@ def unfreeze_customer(id):
     return jsonify({"message": "Customer unfrozen"})
 
 
-# =====================================
-# DELETE CUSTOMER
-# =====================================
 @admin_bp.route("/api/admin/customers/<int:id>", methods=["DELETE"])
 def delete_customer(id):
     from sqlalchemy import text as sql_text
