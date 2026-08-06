@@ -25,29 +25,40 @@ def is_frozen(account):
 
 
 def get_settings():
-    s = AdminSettings.query.first()
-    if not s:
-        s = AdminSettings(
-            imf_code="IMF-0000",
-            cot_code="COT-0000",
-            require_imf=True,
-            require_cot=True,
-        )
-        db.session.add(s)
-        db.session.commit()
-    return s
+    try:
+        s = AdminSettings.query.first()
+        if not s:
+            s = AdminSettings()
+            db.session.add(s)
+            db.session.commit()
+        return s
+    except Exception as e:
+        print("get_settings error:", e)
+        return None
 
 
 def validate_codes(data):
-    settings = get_settings()
-    if getattr(settings, "require_imf", True):
-        imf = (data.get("imf_code") or "").strip()
-        if not imf or imf != (settings.imf_code or "").strip():
-            return "Invalid IMF code"
-    if getattr(settings, "require_cot", True):
-        cot = (data.get("cot_code") or "").strip()
-        if not cot or cot != (settings.cot_code or "").strip():
-            return "Invalid COT code"
+    """Return error message if IMF/COT invalid, else None. Safe if columns missing."""
+    try:
+        settings = get_settings()
+        if not settings:
+            return None
+
+        require_imf = bool(getattr(settings, "require_imf", False))
+        require_cot = bool(getattr(settings, "require_cot", False))
+        imf_code = (getattr(settings, "imf_code", None) or "").strip()
+        cot_code = (getattr(settings, "cot_code", None) or "").strip()
+
+        if require_imf:
+            imf = (data.get("imf_code") or "").strip()
+            if not imf or (imf_code and imf != imf_code):
+                return "Invalid IMF code"
+        if require_cot:
+            cot = (data.get("cot_code") or "").strip()
+            if not cot or (cot_code and cot != cot_code):
+                return "Invalid COT code"
+    except Exception as e:
+        print("validate_codes skip:", e)
     return None
 
 
@@ -105,7 +116,11 @@ def admin_transactions():
 def deposit():
     data = request.json or {}
     account_number = data.get("account_number")
-    amount = float(data.get("amount", 0) or 0)
+    try:
+        amount = float(data.get("amount", 0) or 0)
+    except (TypeError, ValueError):
+        return jsonify({"message": "Invalid amount"}), 400
+
     account = Account.query.filter_by(account_number=account_number).first()
     if not account:
         return jsonify({"message": "Account not found"}), 404
@@ -113,6 +128,7 @@ def deposit():
         return jsonify({"message": "This account is frozen. Transactions are not allowed."}), 403
     if amount <= 0:
         return jsonify({"message": "Invalid amount"}), 400
+
     account.balance += amount
     reference = str(uuid.uuid4())[:12].upper()
     tx = Transaction(
@@ -133,7 +149,11 @@ def deposit():
 def withdraw():
     data = request.json or {}
     account_number = data.get("account_number")
-    amount = float(data.get("amount", 0) or 0)
+    try:
+        amount = float(data.get("amount", 0) or 0)
+    except (TypeError, ValueError):
+        return jsonify({"message": "Invalid amount"}), 400
+
     account = Account.query.filter_by(account_number=account_number).first()
     if not account:
         return jsonify({"message": "Account not found"}), 404
@@ -141,6 +161,7 @@ def withdraw():
         return jsonify({"message": "This account is frozen. Transactions are not allowed."}), 403
     if amount <= 0 or account.balance < amount:
         return jsonify({"message": "Insufficient balance"}), 400
+
     account.balance -= amount
     reference = str(uuid.uuid4())[:12].upper()
     tx = Transaction(
@@ -159,124 +180,137 @@ def withdraw():
 
 @transaction_bp.route("/api/transactions/transfer", methods=["POST"])
 def transfer():
-    data = request.json or {}
-    sender_number = data.get("from_account")
-    receiver_number = (data.get("to_account") or "").strip()
-    amount = float(data.get("amount", 0) or 0)
-    transfer_type = (data.get("transfer_type") or "local").lower()  # local | international
-    bank_name = (data.get("bank_name") or "").strip()
-    beneficiary_name = (data.get("beneficiary_name") or "").strip()
+    try:
+        data = request.json or {}
+        sender_number = data.get("from_account")
+        receiver_number = (data.get("to_account") or "").strip()
+        transfer_type = (data.get("transfer_type") or "local").lower()
+        bank_name = (data.get("bank_name") or "").strip()
+        beneficiary_name = (data.get("beneficiary_name") or "").strip()
 
-    sender = Account.query.filter_by(account_number=sender_number).first()
-    if not sender:
-        return jsonify({"message": "Sender account not found"}), 404
+        try:
+            amount = float(data.get("amount", 0) or 0)
+        except (TypeError, ValueError):
+            return jsonify({"message": "Invalid amount"}), 400
 
-    if is_frozen(sender):
-        return jsonify({"message": "Your account is frozen. Transactions are not allowed."}), 403
+        sender = Account.query.filter_by(account_number=sender_number).first()
+        if not sender:
+            return jsonify({"message": "Sender account not found"}), 404
 
-    code_error = validate_codes(data)
-    if code_error:
-        return jsonify({"message": code_error}), 403
+        if is_frozen(sender):
+            return jsonify({"message": "Your account is frozen. Transactions are not allowed."}), 403
 
-    if amount <= 0:
-        return jsonify({"message": "Invalid amount"}), 400
-    if sender.balance < amount:
-        return jsonify({"message": "Insufficient balance"}), 400
+        code_error = validate_codes(data)
+        if code_error:
+            return jsonify({"message": code_error}), 403
 
-    sender_user = User.query.get(sender.user_id)
-    out_ref = str(uuid.uuid4())[:12].upper()
-    now = datetime.utcnow()
+        if amount <= 0:
+            return jsonify({"message": "Invalid amount"}), 400
+        if sender.balance < amount:
+            return jsonify({"message": "Insufficient balance"}), 400
 
-    # ---------- LOCAL (NovaBank → NovaBank) ----------
-    if transfer_type == "local":
-        receiver = Account.query.filter_by(account_number=receiver_number).first()
-        if not receiver:
-            return jsonify({"message": "Receiver NovaBank account not found"}), 404
-        if is_frozen(receiver):
-            return jsonify({"message": "Receiver account is frozen. Transfer not allowed."}), 403
+        sender_user = User.query.get(sender.user_id)
+        out_ref = str(uuid.uuid4())[:12].upper()
+        now = datetime.utcnow()
+
+        # ===== LOCAL (NovaBank → NovaBank) =====
+        if transfer_type == "local":
+            receiver = Account.query.filter_by(account_number=receiver_number).first()
+            if not receiver:
+                return jsonify({"message": "Receiver NovaBank account not found"}), 404
+            if is_frozen(receiver):
+                return jsonify({"message": "Receiver account is frozen. Transfer not allowed."}), 403
+
+            sender.balance -= amount
+            receiver.balance += amount
+            in_ref = str(uuid.uuid4())[:12].upper()
+
+            db.session.add_all([
+                Transaction(
+                    account_id=sender.id,
+                    transaction_reference=out_ref,
+                    description=f"Local transfer to {receiver.account_number}",
+                    amount=amount,
+                    transaction_type="Transfer Out",
+                    related_account=receiver.account_number,
+                    balance_after=sender.balance,
+                    created_by="Customer",
+                    status="Completed",
+                ),
+                Transaction(
+                    account_id=receiver.id,
+                    transaction_reference=in_ref,
+                    description=f"Local transfer from {sender.account_number}",
+                    amount=amount,
+                    transaction_type="Transfer In",
+                    related_account=sender.account_number,
+                    balance_after=receiver.balance,
+                    created_by="Customer",
+                    status="Completed",
+                ),
+            ])
+            db.session.commit()
+
+            return jsonify({
+                "message": "Transfer successful",
+                "status": "Completed",
+                "transfer_type": "local",
+                "reference": out_ref,
+                "amount": amount,
+                "from_account": sender.account_number,
+                "to_account": receiver.account_number,
+                "bank_name": "NovaBank",
+                "beneficiary_name": None,
+                "sender_name": sender_user.name if sender_user else None,
+                "sender_balance": sender.balance,
+                "date": now.isoformat(),
+            })
+
+        # ===== INTERNATIONAL =====
+        if not bank_name:
+            return jsonify({"message": "Select a destination bank / service"}), 400
+        if not receiver_number:
+            return jsonify({"message": "Enter beneficiary account / wallet ID"}), 400
 
         sender.balance -= amount
-        receiver.balance += amount
-        in_ref = str(uuid.uuid4())[:12].upper()
+        desc = f"International transfer via {bank_name} to {receiver_number}"
+        if beneficiary_name:
+            desc += f" ({beneficiary_name})"
 
-        db.session.add_all([
+        # related_account max length is often 20 — keep it short
+        related = f"{bank_name[:12]}:{receiver_number}"[:20]
+
+        db.session.add(
             Transaction(
                 account_id=sender.id,
                 transaction_reference=out_ref,
-                description=f"Local transfer to {receiver.account_number}",
+                description=desc[:150],
                 amount=amount,
-                transaction_type="Transfer Out",
-                related_account=receiver.account_number,
+                transaction_type="International Transfer",
+                related_account=related,
                 balance_after=sender.balance,
                 created_by="Customer",
                 status="Completed",
-            ),
-            Transaction(
-                account_id=receiver.id,
-                transaction_reference=in_ref,
-                description=f"Local transfer from {sender.account_number}",
-                amount=amount,
-                transaction_type="Transfer In",
-                related_account=sender.account_number,
-                balance_after=receiver.balance,
-                created_by="Customer",
-                status="Completed",
-            ),
-        ])
+            )
+        )
         db.session.commit()
 
         return jsonify({
             "message": "Transfer successful",
             "status": "Completed",
-            "transfer_type": "local",
+            "transfer_type": "international",
             "reference": out_ref,
             "amount": amount,
             "from_account": sender.account_number,
-            "to_account": receiver.account_number,
-            "bank_name": "NovaBank",
-            "beneficiary_name": None,
+            "to_account": receiver_number,
+            "bank_name": bank_name,
+            "beneficiary_name": beneficiary_name or None,
             "sender_name": sender_user.name if sender_user else None,
             "sender_balance": sender.balance,
             "date": now.isoformat(),
         })
 
-    # ---------- INTERNATIONAL ----------
-    if not bank_name:
-        return jsonify({"message": "Select a destination bank / service"}), 400
-    if not receiver_number:
-        return jsonify({"message": "Enter beneficiary account / wallet ID"}), 400
-
-    sender.balance -= amount
-    desc = f"International transfer via {bank_name} to {receiver_number}"
-    if beneficiary_name:
-        desc += f" ({beneficiary_name})"
-
-    db.session.add(
-        Transaction(
-            account_id=sender.id,
-            transaction_reference=out_ref,
-            description=desc,
-            amount=amount,
-            transaction_type="International Transfer",
-            related_account=f"{bank_name}:{receiver_number}",
-            balance_after=sender.balance,
-            created_by="Customer",
-            status="Completed",
-        )
-    )
-    db.session.commit()
-
-    return jsonify({
-        "message": "Transfer successful",
-        "status": "Completed",
-        "transfer_type": "international",
-        "reference": out_ref,
-        "amount": amount,
-        "from_account": sender.account_number,
-        "to_account": receiver_number,
-        "bank_name": bank_name,
-        "beneficiary_name": beneficiary_name or None,
-        "sender_name": sender_user.name if sender_user else None,
-        "sender_balance": sender.balance,
-        "date": now.isoformat(),
-    })
+    except Exception as e:
+        db.session.rollback()
+        print("TRANSFER ERROR:", repr(e))
+        return jsonify({"message": "Transfer failed", "error": str(e)}), 500
