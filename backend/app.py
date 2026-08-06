@@ -27,7 +27,13 @@ from routes.notification_routes import notification_bp
 
 app = Flask(__name__)
 
-CORS(app, resources={r"/api/*": {"origins": "*"}}, supports_credentials=True)
+CORS(
+    app,
+    resources={r"/*": {"origins": "*"}},
+    supports_credentials=False,
+    allow_headers=["Content-Type", "Authorization"],
+    methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+)
 
 # ---------- DATABASE ----------
 database_url = os.environ.get("DATABASE_URL", "").strip()
