@@ -3,7 +3,6 @@ from database import db
 from models.account import Account
 from models.transaction import Transaction
 from models.user import User
-from models.admin_settings import AdminSettings
 import uuid
 from datetime import datetime
 
@@ -24,41 +23,37 @@ def is_frozen(account):
     return status and status.lower() == "frozen"
 
 
-def get_settings():
-    try:
-        s = AdminSettings.query.first()
-        if not s:
-            s = AdminSettings()
-            db.session.add(s)
-            db.session.commit()
-        return s
-    except Exception as e:
-        print("get_settings error:", e)
-        return None
-
-
 def validate_codes(data):
-    """Return error message if IMF/COT invalid, else None. Safe if columns missing."""
+    """
+    Check IMF/COT only if AdminSettings has those fields.
+    Never crash if columns are missing.
+    """
     try:
-        settings = get_settings()
+        from models.admin_settings import AdminSettings
+        settings = AdminSettings.query.first()
         if not settings:
+            return None
+
+        # If model/DB has no these attributes, skip quietly
+        if not hasattr(settings, "require_imf") and not hasattr(settings, "imf_code"):
             return None
 
         require_imf = bool(getattr(settings, "require_imf", False))
         require_cot = bool(getattr(settings, "require_cot", False))
-        imf_code = (getattr(settings, "imf_code", None) or "").strip()
-        cot_code = (getattr(settings, "cot_code", None) or "").strip()
+        imf_expected = (getattr(settings, "imf_code", None) or "").strip()
+        cot_expected = (getattr(settings, "cot_code", None) or "").strip()
 
         if require_imf:
             imf = (data.get("imf_code") or "").strip()
-            if not imf or (imf_code and imf != imf_code):
+            if not imf or (imf_expected and imf != imf_expected):
                 return "Invalid IMF code"
+
         if require_cot:
             cot = (data.get("cot_code") or "").strip()
-            if not cot or (cot_code and cot != cot_code):
+            if not cot or (cot_expected and cot != cot_expected):
                 return "Invalid COT code"
     except Exception as e:
-        print("validate_codes skip:", e)
+        print("validate_codes skipped:", e)
     return None
 
 
@@ -213,7 +208,7 @@ def transfer():
         out_ref = str(uuid.uuid4())[:12].upper()
         now = datetime.utcnow()
 
-        # ===== LOCAL (NovaBank → NovaBank) =====
+        # ===== LOCAL =====
         if transfer_type == "local":
             receiver = Account.query.filter_by(account_number=receiver_number).first()
             if not receiver:
@@ -229,24 +224,22 @@ def transfer():
                 Transaction(
                     account_id=sender.id,
                     transaction_reference=out_ref,
-                    description=f"Local transfer to {receiver.account_number}",
+                    description=f"Local transfer to {receiver.account_number}"[:150],
                     amount=amount,
                     transaction_type="Transfer Out",
-                    related_account=receiver.account_number,
+                    related_account=(receiver.account_number or "")[:20],
                     balance_after=sender.balance,
                     created_by="Customer",
-                    status="Completed",
                 ),
                 Transaction(
                     account_id=receiver.id,
                     transaction_reference=in_ref,
-                    description=f"Local transfer from {sender.account_number}",
+                    description=f"Local transfer from {sender.account_number}"[:150],
                     amount=amount,
                     transaction_type="Transfer In",
-                    related_account=sender.account_number,
+                    related_account=(sender.account_number or "")[:20],
                     balance_after=receiver.balance,
                     created_by="Customer",
-                    status="Completed",
                 ),
             ])
             db.session.commit()
@@ -273,24 +266,25 @@ def transfer():
             return jsonify({"message": "Enter beneficiary account / wallet ID"}), 400
 
         sender.balance -= amount
-        desc = f"International transfer via {bank_name} to {receiver_number}"
+
+        desc = f"Intl via {bank_name} to {receiver_number}"
         if beneficiary_name:
             desc += f" ({beneficiary_name})"
+        desc = desc[:150]
 
-        # related_account max length is often 20 — keep it short
-        related = f"{bank_name[:12]}:{receiver_number}"[:20]
+        # related_account column is only 20 characters
+        related = (bank_name[:8] + ":" + receiver_number)[:20]
 
         db.session.add(
             Transaction(
                 account_id=sender.id,
                 transaction_reference=out_ref,
-                description=desc[:150],
+                description=desc,
                 amount=amount,
-                transaction_type="International Transfer",
+                transaction_type="Intl Transfer",  # keep under 30 chars
                 related_account=related,
                 balance_after=sender.balance,
                 created_by="Customer",
-                status="Completed",
             )
         )
         db.session.commit()
