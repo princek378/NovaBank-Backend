@@ -10,10 +10,18 @@ customer_bp = Blueprint("customer", __name__)
 @customer_bp.route("/api/customer/profile", methods=["GET"])
 @jwt_required()
 def customer_profile():
-    user_id = get_jwt_identity()
+    raw_id = get_jwt_identity()
+    try:
+        user_id = int(raw_id)
+    except (TypeError, ValueError):
+        return jsonify({"message": "Invalid token"}), 401
+
     user = User.query.get(user_id)
     if not user:
         return jsonify({"message": "User not found"}), 404
+
+    if (getattr(user, "role", None) or "") == "Admin":
+        return jsonify({"message": "Admin accounts cannot use the customer portal"}), 403
 
     account = Account.query.filter_by(user_id=user.id).first()
     transactions = []
