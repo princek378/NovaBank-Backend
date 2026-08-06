@@ -8,7 +8,6 @@ import os
 
 chat_bp = Blueprint("chat", __name__, url_prefix="/api/chat")
 
-# Change this PIN in Render Environment if you want
 SUPPORT_PIN = os.environ.get("SUPPORT_PIN", "novabank123")
 
 
@@ -22,16 +21,59 @@ def serialize_msg(msg):
     }
 
 
-# =====================================
-# START / RESUME GUEST CHAT (no login)
-# =====================================
-@chat_bp.route("/guest/start", methods=["POST"])
-def guest_start():
+# ---------- Guest: one-shot message (old form) ----------
+@chat_bp.route("/guest", methods=["POST", "OPTIONS"])
+def guest_message():
+    if request.method == "OPTIONS":
+        return "", 204
     try:
         data = request.json or {}
         name = (data.get("name") or "Guest").strip()
         email = (data.get("email") or "").strip().lower()
+        text = (data.get("message") or "").strip()
+        if not email or not text:
+            return jsonify({"message": "Email and message are required"}), 400
 
+        user = User.query.filter_by(email=email).first()
+        if not user:
+            user = User(
+                name=name,
+                email=email,
+                password=generate_password_hash(secrets.token_hex(16)),
+                role="Customer",
+                status="Active",
+            )
+            db.session.add(user)
+            db.session.commit()
+
+        msg = Message(
+            user_id=user.id,
+            sender="Customer",
+            message=f"[Guest support] {text}",
+            status="Sent",
+            is_read=False,
+        )
+        db.session.add(msg)
+        db.session.commit()
+        return jsonify({
+            "message": "Message sent successfully",
+            "user_id": user.id,
+        }), 201
+    except Exception as e:
+        print("guest_message error:", e)
+        db.session.rollback()
+        return jsonify({"message": "Failed to send message"}), 500
+
+
+# ---------- Guest: start live chat ----------
+@chat_bp.route("/guest/start", methods=["POST", "OPTIONS"])
+def guest_start():
+    if request.method == "OPTIONS":
+        return "", 204
+    try:
+        data = request.json or {}
+        name = (data.get("name") or "Guest").strip()
+        email = (data.get("email") or "").strip().lower()
         if not email:
             return jsonify({"message": "Email is required"}), 400
 
@@ -46,11 +88,9 @@ def guest_start():
             )
             db.session.add(user)
             db.session.commit()
-        else:
-            # update name if provided
-            if name and name != "Guest":
-                user.name = name
-                db.session.commit()
+        elif name and name != "Guest":
+            user.name = name
+            db.session.commit()
 
         return jsonify({
             "user_id": user.id,
@@ -63,11 +103,11 @@ def guest_start():
         return jsonify({"message": "Could not start chat"}), 500
 
 
-# =====================================
-# GUEST SEND MESSAGE
-# =====================================
-@chat_bp.route("/guest/send", methods=["POST"])
+# ---------- Guest: send chat message ----------
+@chat_bp.route("/guest/send", methods=["POST", "OPTIONS"])
 def guest_send():
+    if request.method == "OPTIONS":
+        return "", 204
     try:
         data = request.json or {}
         user_id = data.get("user_id")
@@ -95,28 +135,11 @@ def guest_send():
         return jsonify({"message": "Failed to send"}), 500
 
 
-# =====================================
-# GET MESSAGES (guest or admin desk)
-# =====================================
-@chat_bp.route("/<int:user_id>", methods=["GET"])
-def get_messages(user_id):
-    try:
-        messages = (
-            Message.query.filter_by(user_id=user_id)
-            .order_by(Message.created_at.asc())
-            .all()
-        )
-        return jsonify([serialize_msg(m) for m in messages])
-    except Exception as e:
-        print("get_messages error:", e)
-        return jsonify({"message": "Could not load messages"}), 500
-
-
-# =====================================
-# NORMAL SEND (customer portal / admin panel)
-# =====================================
-@chat_bp.route("/send", methods=["POST"])
+# ---------- Normal send ----------
+@chat_bp.route("/send", methods=["POST", "OPTIONS"])
 def send_message():
+    if request.method == "OPTIONS":
+        return "", 204
     try:
         data = request.json or {}
         user_id = data.get("user_id")
@@ -141,11 +164,28 @@ def send_message():
         return jsonify({"message": "Failed to send message"}), 500
 
 
-# =====================================
-# SUPPORT DESK — unlock with PIN (no admin login)
-# =====================================
-@chat_bp.route("/desk/unlock", methods=["POST"])
+# ---------- Get messages ----------
+@chat_bp.route("/<int:user_id>", methods=["GET", "OPTIONS"])
+def get_messages(user_id):
+    if request.method == "OPTIONS":
+        return "", 204
+    try:
+        messages = (
+            Message.query.filter_by(user_id=user_id)
+            .order_by(Message.created_at.asc())
+            .all()
+        )
+        return jsonify([serialize_msg(m) for m in messages])
+    except Exception as e:
+        print("get_messages error:", e)
+        return jsonify({"message": "Could not load messages"}), 500
+
+
+# ---------- Support desk ----------
+@chat_bp.route("/desk/unlock", methods=["POST", "OPTIONS"])
 def desk_unlock():
+    if request.method == "OPTIONS":
+        return "", 204
     data = request.json or {}
     pin = (data.get("pin") or "").strip()
     if pin != SUPPORT_PIN:
@@ -153,19 +193,18 @@ def desk_unlock():
     return jsonify({"ok": True, "message": "Unlocked"})
 
 
-@chat_bp.route("/desk/conversations", methods=["GET"])
+@chat_bp.route("/desk/conversations", methods=["GET", "OPTIONS"])
 def desk_conversations():
-    """List users who have messages (for support desk)."""
+    if request.method == "OPTIONS":
+        return "", 204
     try:
         pin = request.args.get("pin") or ""
         if pin != SUPPORT_PIN:
             return jsonify({"message": "Unauthorized"}), 403
 
-        # Distinct user_ids that have messages
         rows = db.session.query(Message.user_id).distinct().all()
-        user_ids = [r[0] for r in rows]
         result = []
-        for uid in user_ids:
+        for (uid,) in rows:
             user = User.query.get(uid)
             if not user:
                 continue
@@ -185,7 +224,6 @@ def desk_conversations():
                 "last_time": last.created_at.strftime("%Y-%m-%d %H:%M") if last and last.created_at else "",
                 "unread": unread,
             })
-        # newest first
         result.sort(key=lambda x: x["last_time"] or "", reverse=True)
         return jsonify(result)
     except Exception as e:
@@ -193,8 +231,10 @@ def desk_conversations():
         return jsonify({"message": "Failed to load"}), 500
 
 
-@chat_bp.route("/desk/reply", methods=["POST"])
+@chat_bp.route("/desk/reply", methods=["POST", "OPTIONS"])
 def desk_reply():
+    if request.method == "OPTIONS":
+        return "", 204
     try:
         data = request.json or {}
         pin = (data.get("pin") or "").strip()
@@ -222,8 +262,10 @@ def desk_reply():
         return jsonify({"message": "Failed to reply"}), 500
 
 
-@chat_bp.route("/unread", methods=["GET"])
+@chat_bp.route("/unread", methods=["GET", "OPTIONS"])
 def unread_messages():
+    if request.method == "OPTIONS":
+        return "", 204
     try:
         count = Message.query.filter_by(sender="Customer", is_read=False).count()
         return jsonify({"unread": count})
@@ -231,8 +273,10 @@ def unread_messages():
         return jsonify({"unread": 0})
 
 
-@chat_bp.route("/read/<int:user_id>", methods=["PUT"])
+@chat_bp.route("/read/<int:user_id>", methods=["PUT", "OPTIONS"])
 def mark_messages_read(user_id):
+    if request.method == "OPTIONS":
+        return "", 204
     try:
         messages = Message.query.filter_by(
             user_id=user_id, sender="Customer", is_read=False
