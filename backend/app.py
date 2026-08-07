@@ -24,6 +24,7 @@ from routes.chat_routes import chat_bp
 from routes.settings_routes import settings_bp
 from routes.report_routes import report_bp
 from routes.notification_routes import notification_bp
+from models.otp import OtpCode
 
 app = Flask(__name__)
 
