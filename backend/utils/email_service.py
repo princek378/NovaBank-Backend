@@ -1,24 +1,77 @@
 import os
+import json
+import urllib.request
+import urllib.error
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
 
 def send_email(to_email, subject, html_body, text_body=None):
+    """
+    Prefer Resend HTTPS API (works on Render free tier).
+    Fall back to SMTP if RESEND_API_KEY is not set.
+    """
+    resend_key = os.environ.get("RESEND_API_KEY", "").strip()
+    from_addr = os.environ.get(
+        "SMTP_FROM",
+        "NovaBank <onboarding@resend.dev>",
+    ).strip()
+
+    if resend_key:
+        return _send_via_resend(resend_key, from_addr, to_email, subject, html_body, text_body)
+
+    return _send_via_smtp(from_addr, to_email, subject, html_body, text_body)
+
+
+def _send_via_resend(api_key, from_addr, to_email, subject, html_body, text_body):
+    payload = {
+        "from": from_addr,
+        "to": [to_email],
+        "subject": subject,
+        "html": html_body,
+    }
+    if text_body:
+        payload["text"] = text_body
+
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        "https://api.resend.com/emails",
+        data=data,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            body = resp.read().decode("utf-8")
+            print("EMAIL SENT via Resend:", subject, "->", to_email, body)
+            return True
+    except urllib.error.HTTPError as e:
+        err = e.read().decode("utf-8", errors="ignore")
+        print("EMAIL ERROR (Resend):", e.code, err)
+        return False
+    except Exception as e:
+        print("EMAIL ERROR (Resend):", repr(e))
+        return False
+
+
+def _send_via_smtp(from_addr, to_email, subject, html_body, text_body):
     host = os.environ.get("SMTP_HOST", "").strip()
     port = int(os.environ.get("SMTP_PORT", "587") or 587)
     user = os.environ.get("SMTP_USER", "").strip()
     password = os.environ.get("SMTP_PASSWORD", "").strip()
-    from_addr = os.environ.get("SMTP_FROM", user or "noreply@novabank.best").strip()
 
     if not host or not user or not password:
-        print("EMAIL SKIPPED (SMTP not configured):", subject, "->", to_email)
+        print("EMAIL SKIPPED (no RESEND_API_KEY and SMTP not configured):", subject, "->", to_email)
         print("Body preview:", (text_body or html_body)[:300])
         return False
 
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
-    msg["From"] = from_addr
+    msg["From"] = from_addr or user
     msg["To"] = to_email
     if text_body:
         msg.attach(MIMEText(text_body, "plain"))
@@ -29,10 +82,10 @@ def send_email(to_email, subject, html_body, text_body=None):
             server.starttls()
             server.login(user, password)
             server.sendmail(user, [to_email], msg.as_string())
-        print("EMAIL SENT:", subject, "->", to_email)
+        print("EMAIL SENT via SMTP:", subject, "->", to_email)
         return True
     except Exception as e:
-        print("EMAIL ERROR:", repr(e))
+        print("EMAIL ERROR (SMTP):", repr(e))
         return False
 
 
