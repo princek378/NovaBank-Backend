@@ -14,6 +14,7 @@ from models.transaction import Transaction
 from models.admin_settings import AdminSettings
 from models.message import Message
 from models.notification import Notification
+from models.otp import OtpCode
 
 from routes.account_routes import account_bp
 from routes.transaction_routes import transaction_bp
@@ -24,10 +25,10 @@ from routes.chat_routes import chat_bp
 from routes.settings_routes import settings_bp
 from routes.report_routes import report_bp
 from routes.notification_routes import notification_bp
-from models.otp import OtpCode
 
 app = Flask(__name__)
 
+# Fixed CORS (works with browser preflight)
 CORS(
     app,
     resources={r"/*": {"origins": "*"}},
@@ -36,15 +37,11 @@ CORS(
     methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
 )
 
-# ---------- DATABASE ----------
 database_url = os.environ.get("DATABASE_URL", "").strip()
 
 if not database_url:
     if os.environ.get("RENDER"):
-        raise RuntimeError(
-            "DATABASE_URL is not set on Render. "
-            "Add DATABASE_URL in Environment settings."
-        )
+        raise RuntimeError("DATABASE_URL is not set on Render.")
     database_url = "sqlite:///novabank.db"
     print("WARNING: Using local SQLite (dev only)")
 
@@ -86,7 +83,6 @@ app.register_blueprint(notification_bp)
 
 @app.route("/")
 def home():
-    # Database check is on the home page so we can always see it
     db_type = "postgresql" if "postgresql" in database_url else "sqlite"
     db_ok = False
     db_error = None
@@ -110,12 +106,7 @@ def home():
 def health():
     try:
         db.session.execute(text("SELECT 1"))
-        db_type = "postgresql" if "postgresql" in database_url else "sqlite"
-        return jsonify({
-            "status": "ok",
-            "database": db_type,
-            "host": _safe,
-        })
+        return jsonify({"status": "ok"})
     except Exception as e:
         return jsonify({"status": "error", "error": str(e)}), 500
 
@@ -140,7 +131,7 @@ def seed_default_admin():
         )
         db.session.add(admin)
         db.session.commit()
-        print("Default admin created → email: admin@novabank.com  password: 12345678")
+        print("Default admin created")
     else:
         print("Admin already exists")
 
