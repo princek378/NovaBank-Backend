@@ -24,7 +24,6 @@ def make_otp():
 
 
 def save_otp(email, purpose, payload=None):
-    # invalidate old codes for same email+purpose
     OtpCode.query.filter_by(email=email, purpose=purpose, used=False).update({"used": True})
     code = make_otp()
     row = OtpCode(
@@ -55,9 +54,11 @@ def check_otp(email, code, purpose):
     return row, None
 
 
-# ---------- REGISTER: step 1 send OTP ----------
-@auth_bp.route("/api/register/request-otp", methods=["POST"])
+@auth_bp.route("/api/register/request-otp", methods=["POST", "OPTIONS"])
 def register_request_otp():
+    if request.method == "OPTIONS":
+        return "", 204
+
     data = request.get_json() or {}
     first_name = (data.get("first_name") or "").strip()
     last_name = (data.get("last_name") or "").strip()
@@ -87,15 +88,17 @@ def register_request_otp():
     sent = send_otp_email(email, code, purpose="register")
 
     return jsonify({
-        "message": "Verification code sent to your email" if sent else "Code created (check server logs if email not configured)",
+        "message": "Verification code sent to your email" if sent else "Verification code generated. Check your email (or server logs if SMTP is not set).",
         "email": email,
         "email_sent": sent,
     })
 
 
-# ---------- REGISTER: step 2 verify OTP & create account ----------
-@auth_bp.route("/api/register/verify", methods=["POST"])
+@auth_bp.route("/api/register/verify", methods=["POST", "OPTIONS"])
 def register_verify():
+    if request.method == "OPTIONS":
+        return "", 204
+
     data = request.get_json() or {}
     email = (data.get("email") or "").strip().lower()
     code = (data.get("otp") or data.get("code") or "").strip()
@@ -141,17 +144,20 @@ def register_verify():
     }), 201
 
 
-# Keep old endpoint blocked or redirect style message
-@auth_bp.route("/api/register", methods=["POST"])
+@auth_bp.route("/api/register", methods=["POST", "OPTIONS"])
 def register_legacy():
+    if request.method == "OPTIONS":
+        return "", 204
     return jsonify({
-        "message": "Please use email verification. Call /api/register/request-otp first.",
+        "message": "Please complete email verification to create an account.",
     }), 400
 
 
-# ---------- LOGIN (unchanged logic) ----------
-@auth_bp.route("/api/login", methods=["POST"])
+@auth_bp.route("/api/login", methods=["POST", "OPTIONS"])
 def login():
+    if request.method == "OPTIONS":
+        return "", 204
+
     data = request.get_json() or {}
     email = (data.get("email") or data.get("username") or "").strip().lower()
     password = data.get("password") or ""
@@ -206,16 +212,17 @@ def login():
     })
 
 
-# ---------- FORGOT PASSWORD: send OTP ----------
-@auth_bp.route("/api/password/forgot", methods=["POST"])
+@auth_bp.route("/api/password/forgot", methods=["POST", "OPTIONS"])
 def password_forgot():
+    if request.method == "OPTIONS":
+        return "", 204
+
     data = request.get_json() or {}
     email = (data.get("email") or "").strip().lower()
     if not email:
         return jsonify({"message": "Email is required"}), 400
 
     user = User.query.filter_by(email=email).first()
-    # Always return success message (don't reveal if email exists)
     if user:
         code = save_otp(email, "reset")
         send_otp_email(email, code, purpose="reset")
@@ -226,9 +233,11 @@ def password_forgot():
     })
 
 
-# ---------- RESET PASSWORD with OTP ----------
-@auth_bp.route("/api/password/reset", methods=["POST"])
+@auth_bp.route("/api/password/reset", methods=["POST", "OPTIONS"])
 def password_reset():
+    if request.method == "OPTIONS":
+        return "", 204
+
     data = request.get_json() or {}
     email = (data.get("email") or "").strip().lower()
     code = (data.get("otp") or data.get("code") or "").strip()
@@ -248,13 +257,15 @@ def password_reset():
     user.password = generate_password_hash(new_password)
     row.used = True
     db.session.commit()
-
     return jsonify({"message": "Password updated successfully. You can log in now."})
 
 
-@auth_bp.route("/api/admin/change-credentials", methods=["PUT"])
+@auth_bp.route("/api/admin/change-credentials", methods=["PUT", "OPTIONS"])
 @jwt_required()
 def change_admin_credentials():
+    if request.method == "OPTIONS":
+        return "", 204
+
     user_id = get_jwt_identity()
     try:
         user_id = int(user_id)
