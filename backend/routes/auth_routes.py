@@ -4,13 +4,8 @@ from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identi
 from database import db
 from models.user import User
 from models.account import Account
-from models.otp import OtpCode
-from utils.email_service import send_otp_email
-from datetime import datetime, timedelta
 import uuid
 import re
-import json
-import random
 
 auth_bp = Blueprint("auth", __name__)
 
@@ -19,43 +14,8 @@ def generate_account_number():
     return "NB" + str(uuid.uuid4().int)[:10]
 
 
-def make_otp():
-    return f"{random.randint(100000, 999999)}"
-
-
-def save_otp(email, purpose, payload=None):
-    OtpCode.query.filter_by(email=email, purpose=purpose, used=False).update({"used": True})
-    code = make_otp()
-    row = OtpCode(
-        email=email,
-        code=code,
-        purpose=purpose,
-        payload=json.dumps(payload) if payload else None,
-        expires_at=datetime.utcnow() + timedelta(minutes=10),
-        used=False,
-    )
-    db.session.add(row)
-    db.session.commit()
-    return code
-
-
-def check_otp(email, code, purpose):
-    row = (
-        OtpCode.query.filter_by(email=email, purpose=purpose, used=False)
-        .order_by(OtpCode.created_at.desc())
-        .first()
-    )
-    if not row:
-        return None, "Invalid or expired code"
-    if row.expires_at < datetime.utcnow():
-        return None, "Code has expired. Request a new one."
-    if row.code != str(code).strip():
-        return None, "Invalid code"
-    return row, None
-
-
-@auth_bp.route("/api/register/request-otp", methods=["POST", "OPTIONS"])
-def register_request_otp():
+@auth_bp.route("/api/register", methods=["POST", "OPTIONS"])
+def register():
     if request.method == "OPTIONS":
         return "", 204
 
@@ -76,51 +36,14 @@ def register_request_otp():
     if User.query.filter_by(email=email).first():
         return jsonify({"message": "Email already exists"}), 400
 
-    payload = {
-        "first_name": first_name,
-        "last_name": last_name,
-        "email": email,
-        "password": password,
-        "phone": phone,
-        "address": address,
-    }
-    code = save_otp(email, "register", payload)
-    sent = send_otp_email(email, code, purpose="register")
-
-    return jsonify({
-        "message": "Verification code sent to your email" if sent else "Verification code generated. Check your email (or server logs if SMTP is not set).",
-        "email": email,
-        "email_sent": sent,
-    })
-
-
-@auth_bp.route("/api/register/verify", methods=["POST", "OPTIONS"])
-def register_verify():
-    if request.method == "OPTIONS":
-        return "", 204
-
-    data = request.get_json() or {}
-    email = (data.get("email") or "").strip().lower()
-    code = (data.get("otp") or data.get("code") or "").strip()
-
-    row, err = check_otp(email, code, "register")
-    if err:
-        return jsonify({"message": err}), 400
-
-    payload = json.loads(row.payload or "{}")
-    if User.query.filter_by(email=email).first():
-        row.used = True
-        db.session.commit()
-        return jsonify({"message": "Email already registered"}), 400
-
     user = User(
-        name=f"{payload.get('first_name', '')} {payload.get('last_name', '')}".strip(),
+        name=f"{first_name} {last_name}",
         email=email,
-        password=generate_password_hash(payload.get("password") or ""),
+        password=generate_password_hash(password),
         role="Customer",
         status="Active",
-        phone=payload.get("phone") or None,
-        address=payload.get("address") or None,
+        phone=phone or None,
+        address=address or None,
     )
     db.session.add(user)
     db.session.commit()
@@ -135,22 +58,12 @@ def register_verify():
         status="Active",
     )
     db.session.add(account)
-    row.used = True
     db.session.commit()
 
     return jsonify({
         "message": "Registration successful",
         "account_number": account_number,
     }), 201
-
-
-@auth_bp.route("/api/register", methods=["POST", "OPTIONS"])
-def register_legacy():
-    if request.method == "OPTIONS":
-        return "", 204
-    return jsonify({
-        "message": "Please complete email verification to create an account.",
-    }), 400
 
 
 @auth_bp.route("/api/login", methods=["POST", "OPTIONS"])
@@ -210,54 +123,6 @@ def login():
             "balance": account_balance,
         },
     })
-
-
-@auth_bp.route("/api/password/forgot", methods=["POST", "OPTIONS"])
-def password_forgot():
-    if request.method == "OPTIONS":
-        return "", 204
-
-    data = request.get_json() or {}
-    email = (data.get("email") or "").strip().lower()
-    if not email:
-        return jsonify({"message": "Email is required"}), 400
-
-    user = User.query.filter_by(email=email).first()
-    if user:
-        code = save_otp(email, "reset")
-        send_otp_email(email, code, purpose="reset")
-
-    return jsonify({
-        "message": "If that email exists, a reset code has been sent.",
-        "email": email,
-    })
-
-
-@auth_bp.route("/api/password/reset", methods=["POST", "OPTIONS"])
-def password_reset():
-    if request.method == "OPTIONS":
-        return "", 204
-
-    data = request.get_json() or {}
-    email = (data.get("email") or "").strip().lower()
-    code = (data.get("otp") or data.get("code") or "").strip()
-    new_password = data.get("password") or data.get("new_password") or ""
-
-    if len(new_password) < 6:
-        return jsonify({"message": "Password must be at least 6 characters"}), 400
-
-    row, err = check_otp(email, code, "reset")
-    if err:
-        return jsonify({"message": err}), 400
-
-    user = User.query.filter_by(email=email).first()
-    if not user:
-        return jsonify({"message": "User not found"}), 404
-
-    user.password = generate_password_hash(new_password)
-    row.used = True
-    db.session.commit()
-    return jsonify({"message": "Password updated successfully. You can log in now."})
 
 
 @auth_bp.route("/api/admin/change-credentials", methods=["PUT", "OPTIONS"])
